@@ -5,3 +5,5 @@ target/
 *.jar
 *.war
 *.zip
+.m2/
+#xd
