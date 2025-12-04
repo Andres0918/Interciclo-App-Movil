@@ -1,0 +1,51 @@
+server:
+  port: 8080  # Puerto donde corre el API Gateway
+
+spring:
+  cloud:
+    gateway:
+      routes:
+        # 🔹 Microservicio de Autenticación (No requiere autenticación)
+        - id: auth
+          uri: lb://auth
+          predicates:
+            - Path=/auth/**
+          filters:
+            - JwtAuthFilter
+        # 🔹 Microservicio Protegido (Ejemplo: Servicios médicos)
+        - id: doctor-module
+          uri: lb://doctor-module
+          predicates:
+            - Path=/med/**
+          filters:
+            - JwtAuthFilter
+      # 🔹 Microservicio Flask IA (sin Eureka, va con URL directa)
+        - id: flask-ml
+          uri: http://flask-ml-service:5000
+          predicates:
+            - Path=/predict/**
+          filters:
+            - JwtAuthFilter
+
+
+
+  application:
+    name: gateway
+  devtools:
+    restart:
+      enabled: true
+    livereload:
+      enabled: true
+
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eurekaserver:8761/eureka/
+  instance:
+    prefer-ip-address: true
+
+jwt:
+  secret: "586Z3272357538782A413F4428911A1B7241635358566B597033733676397124"
+
+
