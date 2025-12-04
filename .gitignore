@@ -1,0 +1,7 @@
+# Directorios de compilación de Java (Maven/Gradle)
+target/
+
+# Archivos JAR, WAR, etc.
+*.jar
+*.war
+*.zip
