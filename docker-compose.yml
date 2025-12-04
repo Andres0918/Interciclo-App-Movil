@@ -1,0 +1,137 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # BASES DE DATOS
+  # ============================================
+  db-authentication:
+    image: postgres:15-alpine
+    container_name: app-db-auth
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: auth
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - db-auth-volume:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  db-application:
+    image: postgres:15-alpine
+    container_name: app-db-main
+    restart: always
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - db-main-volume:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  # ============================================
+  # MICROSERVICIOS
+  # ============================================
+  eurekaserver:
+    image: maven:3.9.6-eclipse-temurin-17
+    container_name: app-eureka
+    ports:
+      - "8761:8761"
+    volumes:
+      - ./eurekaserver:/app
+      - maven-repository:/root/.m2
+    working_dir: /app
+    command: mvn org.springframework.boot:spring-boot-maven-plugin:run
+    networks:
+      - app-network
+
+  api-gateway:
+    image: maven:3.9.6-eclipse-temurin-17
+    container_name: app-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - spring.profiles.active=dev
+      - eureka.client.service-url.defaultZone=http://eurekaserver:8761/eureka
+    volumes:
+      - ./gateway:/app
+      - maven-repository:/root/.m2
+    working_dir: /app
+    command: mvn org.springframework.boot:spring-boot-maven-plugin:run
+    depends_on:
+      - eurekaserver
+    networks:
+      - app-network
+    restart: on-failure
+
+  authentication-service:
+    image: maven:3.9.6-eclipse-temurin-17
+    container_name: app-auth-svc
+    ports:
+      - "8081:8081"
+    environment:
+      - spring.profiles.active=dev
+      - spring.datasource.url=jdbc:postgresql://db-authentication:5432/auth
+      - spring.datasource.username=postgres
+      - spring.datasource.password=postgres
+      - eureka.client.service-url.defaultZone=http://eurekaserver:8761/eureka
+    volumes:
+      - ./auth:/app
+      - maven-repository:/root/.m2
+    working_dir: /app
+    command: mvn org.springframework.boot:spring-boot-maven-plugin:run
+    depends_on:
+      - db-authentication
+      - eurekaserver
+    networks:
+      - app-network
+    restart: on-failure
+
+  application-service:
+    image: maven:3.9.6-eclipse-temurin-17
+    container_name: app-core-svc
+    ports:
+      - "8082:8082"
+    environment:
+      - spring.profiles.active=dev
+      - spring.datasource.url=jdbc:postgresql://db-application:5432/app
+      - spring.datasource.username=postgres
+      - spring.datasource.password=postgres
+      - eureka.client.service-url.defaultZone=http://eurekaserver:8761/eureka
+      - MAVEN_OPTS=-Dfile.encoding=UTF-8
+
+    volumes:
+      - ./demo:/app
+      - maven-repository:/root/.m2
+    working_dir: /app
+    command: mvn -U org.springframework.boot:spring-boot-maven-plugin:run
+    depends_on:
+      - db-application
+      - eurekaserver
+    networks:
+      - app-network
+    restart: on-failure
+
+# ============================================
+# VOLÚMENES PERSISTENTES
+# ============================================
+volumes:
+  db-auth-volume:
+    name: app_auth_data
+  db-main-volume:
+    name: app_main_data
+  maven-repository:
+    name: app_maven_cache
+
+# ============================================
+# REDES
+# ============================================
+networks:
+  app-network:
+    name: app_backend_network
+    driver: bridge
