@@ -3,90 +3,123 @@ package com.example.demo.service
 import com.example.demo.model.entities.Publicacion
 import com.example.demo.model.request.PublicacionRequest
 import com.example.demo.model.responses.PublicacionResponse
-import com.example.demo.repository.PublicacionRepository
-import org.bouncycastle.asn1.x500.style.RFC4519Style.description
-import org.bouncycastle.asn1.x509.ObjectDigestInfo.publicKey
-import org.springframework.data.rest.webmvc.ResourceNotFoundException
+import com.google.cloud.firestore.Firestore
+import com.google.cloud.firestore.FieldValue
 import org.springframework.stereotype.Service
 import java.util.UUID
 
 @Service
-class PublicacionService (
-    private val publicacionRepository: PublicacionRepository
-){
+class PublicacionService(
+    private val firestore: Firestore
+) {
+    private val collectionName = "publicaciones"
+
     fun crearPublicacion(accountId: UUID, request: PublicacionRequest): PublicacionResponse {
+        val uuid = UUID.randomUUID().toString()
         val publicacion = Publicacion(
             accountId = accountId.toString(),
+            uuid = uuid,
             description = request.descripcion,
             likes = 0,
             comentarios = mutableListOf()
         )
 
-        val publicacionGuardada = publicacionRepository.save(publicacion)
+        firestore.collection(collectionName)
+            .document(uuid.toString())
+            .set(publicacion)
+            .get()
 
-        return PublicacionResponse(
-            accountId = publicacionGuardada.accountId,
-            uuid = publicacionGuardada.uuid,
-            description = publicacionGuardada.description!!,
-            likes = publicacionGuardada.likes!!,
-            comentarios = publicacionGuardada.comentarios
-        )
+        return toResponse(publicacion)
     }
 
     fun getPublicacionesByAccountId(accountId: String): List<PublicacionResponse> {
-        val publicaciones = publicacionRepository.findByAccountId(accountId)
+        val snapshot = firestore.collection(collectionName)
+            .whereEqualTo("accountId", accountId)
+            .get()
+            .get()
 
-        return publicaciones.map { toResponse(it) }
+        return snapshot.documents.mapNotNull { doc ->
+            doc.toObject(Publicacion::class.java)?.let { toResponse(it) }
+        }
     }
 
-    fun getPublicacionById(publicacionId: UUID): PublicacionResponse? {
-        val publicacion = publicacionRepository.findByUuid(publicacionId).orElseThrow {
-            throw ResourceNotFoundException()
+    fun getPublicacionById(publicacionId: UUID): PublicacionResponse {
+        val docRef = firestore.collection(collectionName).document(publicacionId.toString())
+        val snapshot = docRef.get().get()
+
+        if (!snapshot.exists()) {
+            throw IllegalArgumentException("Publicacion does not exist")
         }
+
+        val publicacion = snapshot.toObject(Publicacion::class.java)
+            ?: throw IllegalArgumentException("Error al deserializar publicación")
 
         return toResponse(publicacion)
     }
 
     fun darLike(publicacionId: UUID): PublicacionResponse {
-        val publicacion = publicacionRepository.findByUuid(publicacionId).orElseThrow {
-            throw ResourceNotFoundException()
-        }
+        val docRef = firestore.collection(collectionName).document(publicacionId.toString())
 
-        publicacion.likes = publicacion.likes!! + 1
+        firestore.runTransaction { transaction ->
+            val snapshot = transaction.get(docRef).get()
 
-        val guardada = publicacionRepository.save(publicacion)
+            if (!snapshot.exists()) {
+                throw IllegalArgumentException("Publicación no encontrada")
+            }
 
-        return this.toResponse(guardada)
+            val likesActuales = snapshot.getLong("likes") ?: 0
+            transaction.update(docRef, "likes", likesActuales + 1)
+        }.get()
+
+        return getPublicacionById(publicacionId)
+    }
+
+    fun quitLike(publicacionId: UUID): PublicacionResponse {
+        val docRef = firestore.collection(collectionName).document(publicacionId.toString())
+
+        firestore.runTransaction { transaction ->
+            val snapshot = transaction.get(docRef).get()
+
+            if (!snapshot.exists()) {
+                throw IllegalArgumentException("Publicación no encontrada")
+            }
+
+            val likesActuales = snapshot.getLong("likes") ?: 0
+            if (likesActuales > 0) {
+                transaction.update(docRef, "likes", likesActuales - 1)
+            }
+        }.get()
+
+        return getPublicacionById(publicacionId)
     }
 
     fun comentarPublicacion(publicacionId: UUID, comentario: String): PublicacionResponse {
-        val publicacion = publicacionRepository.findByUuid(publicacionId).orElseThrow {
-            throw ResourceNotFoundException()
-        }
+        val docRef = firestore.collection(collectionName).document(publicacionId.toString())
 
-        publicacion.comentarios.add(comentario)
+        docRef.update("comentarios", FieldValue.arrayUnion(comentario)).get()
 
-        val guardada = publicacionRepository.save(publicacion)
-        return this.toResponse(guardada)
+        return getPublicacionById(publicacionId)
     }
 
     fun cambiarDescripcionDePublicacion(publicacionId: UUID, descripcion: String): PublicacionResponse {
-        val publicacion = publicacionRepository.findByUuid(publicacionId).orElseThrow {
-            throw ResourceNotFoundException()
+        val docRef = firestore.collection(collectionName).document(publicacionId.toString())
+
+        val snapshot = docRef.get().get()
+        if (!snapshot.exists()) {
+            throw IllegalArgumentException("Publicación no encontrada")
         }
 
-        publicacion.description = descripcion
+        docRef.update("description", descripcion).get()
 
-        val guardada = publicacionRepository.save(publicacion)
-        return this.toResponse(guardada)
+        return getPublicacionById(publicacionId)
     }
 
     private fun toResponse(publicacion: Publicacion): PublicacionResponse {
         return PublicacionResponse(
             accountId = publicacion.accountId,
             uuid = publicacion.uuid,
-            description = publicacion.description!!,
-            likes = 0,
+            description = publicacion.description ?: "",
+            likes = publicacion.likes ?: 0,
             comentarios = publicacion.comentarios
         )
     }

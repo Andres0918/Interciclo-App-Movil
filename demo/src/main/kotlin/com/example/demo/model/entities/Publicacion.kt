@@ -1,24 +1,26 @@
 package com.example.demo.model.entities
 
-import jakarta.persistence.*
+import com.google.cloud.firestore.annotation.DocumentId
 import java.util.UUID
 
-@Entity
-class Publicacion (
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
-    var id: Long? = null,
+data class Publicacion(
+    @DocumentId
+    var uuid: String = UUID.randomUUID().toString(),
 
-    var uuid: UUID = UUID.randomUUID(),
-
-    var accountId: String ,
+    var accountId: String = "",
 
     var description: String? = null,
 
-    var likes: Int? = null,
+    var likes: Int = 0,
 
-    @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "comentarios")
-    var comentarios: MutableList<String> = mutableListOf(),
-
-    ) {
+    var comentarios: MutableList<String> = mutableListOf()
+) {
+    // Constructor sin argumentos requerido por Firestore
+    constructor() : this(
+        uuid = UUID.randomUUID().toString(),
+        accountId = "",
+        description = null,
+        likes = 0,
+        comentarios = mutableListOf()
+    )
 }
