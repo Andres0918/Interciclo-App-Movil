@@ -1,74 +1,103 @@
 package com.example.demo.controller
 
-import com.example.demo.model.request.PublicacionRequest
 import com.example.demo.model.responses.PublicacionResponse
 import com.example.demo.service.PublicacionService
-import org.apache.coyote.Response
 import org.springframework.http.HttpStatus
-import org.springframework.http.ResponseEntity
-import org.springframework.web.bind.annotation.GetMapping
-import org.springframework.web.bind.annotation.PathVariable
-import org.springframework.web.bind.annotation.PostMapping
-import org.springframework.web.bind.annotation.PutMapping
-import org.springframework.web.bind.annotation.RequestBody
-import org.springframework.web.bind.annotation.RequestHeader
-import org.springframework.web.bind.annotation.RequestMapping
-import org.springframework.web.bind.annotation.RequestParam
-import org.springframework.web.bind.annotation.RestController
+import org.springframework.http.MediaType
+import org.springframework.http.codec.multipart.FilePart
+import org.springframework.web.bind.annotation.*
+import reactor.core.publisher.Flux
+import reactor.core.publisher.Mono
 import java.util.UUID
 
-
 @RestController
-@RequestMapping("/publicacion")
+@RequestMapping("/app/publicacion")
 class PublicacionController(
     private val publicacionService: PublicacionService
-){
+) {
 
-    @PostMapping
-    fun crearPublicacion(@RequestBody publicacionRequest: PublicacionRequest, @RequestHeader accountId: UUID): ResponseEntity<PublicacionResponse> {
-        return ResponseEntity.status(HttpStatus.CREATED)
-            .body(publicacionService.crearPublicacion(accountId, publicacionRequest))
+    @PostMapping(consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
+    @ResponseStatus(HttpStatus.CREATED)
+    fun crearPublicacion(
+        @RequestPart("descripcion") descripcion: String,
+        @RequestPart("imagen") imagen: FilePart,
+        @RequestPart("filter", required = false) filter: String?,
+        @RequestHeader accountId: UUID
+    ): Mono<PublicacionResponse> {
+        // Convertir FilePart a ByteArray reactivamente
+        return imagen.content()
+            .reduce(ByteArray(0)) { acc, dataBuffer ->
+                val bytes = ByteArray(dataBuffer.readableByteCount())
+                dataBuffer.read(bytes)
+                org.springframework.core.io.buffer.DataBufferUtils.release(dataBuffer)
+                acc + bytes
+            }
+            .flatMap { imageBytes ->
+                publicacionService.crearPublicacion(
+                    accountId = accountId.toString(),
+                    descripcion = descripcion,
+                    imagen = imageBytes,
+                    filterName = filter
+                )
+            }
     }
 
     @GetMapping("/obtener/all")
-    fun getPublicacionesByAccountId(@RequestHeader accountId: String): ResponseEntity<List<PublicacionResponse>> {
-        return ResponseEntity
-            .status(HttpStatus.OK)
-            .body(publicacionService.getPublicacionesByAccountId(accountId))
+    fun getPublicacionesByAccountId(
+        @RequestHeader accountId: String
+    ): Flux<PublicacionResponse> {
+        return publicacionService.getPublicacionesByAccount(accountId)
     }
 
     @GetMapping("/obtener/{publicacionId}")
-    fun getPublicacionById(@PathVariable publicacionId: UUID): ResponseEntity<PublicacionResponse> {
-        return ResponseEntity
-            .status(HttpStatus.OK)
-            .body(publicacionService.getPublicacionById(publicacionId))
+    fun getPublicacionById(
+        @PathVariable publicacionId: String
+    ): Mono<PublicacionResponse> {
+        return publicacionService.getPublicacionById(publicacionId)
+    }
+
+    @GetMapping("/feed")
+    fun getFeed(
+        @RequestParam(defaultValue = "50") limit: Int
+    ): Flux<PublicacionResponse> {
+        return publicacionService.getFeed(limit)
     }
 
     @PutMapping("/add/like")
-    fun getDarLike(@RequestParam publicacionId: UUID): ResponseEntity<PublicacionResponse> {
-        return ResponseEntity
-            .status(HttpStatus.OK)
-            .body(publicacionService.darLike(publicacionId))
+    fun getDarLike(
+        @RequestParam publicacionId: String
+    ): Mono<PublicacionResponse> {
+        return publicacionService.darLike(publicacionId)
     }
 
     @PutMapping("/quit/like")
-    fun quitLike(@RequestParam publicacionId: UUID): ResponseEntity<PublicacionResponse> {
-        return ResponseEntity
-            .status(HttpStatus.OK)
-            .body(publicacionService.quitLike(publicacionId))
+    fun quitLike(
+        @RequestParam publicacionId: String
+    ): Mono<PublicacionResponse> {
+        return publicacionService.quitarLike(publicacionId)
     }
 
     @PutMapping("/comment/post/{publicacionId}")
-    fun comentarPublicacion(@PathVariable publicacionId: UUID, @RequestParam comentario: String): ResponseEntity<PublicacionResponse> {
-        return ResponseEntity
-            .status(HttpStatus.OK)
-            .body(publicacionService.comentarPublicacion(publicacionId, comentario))
+    fun comentarPublicacion(
+        @PathVariable publicacionId: String,
+        @RequestParam comentario: String
+    ): Mono<PublicacionResponse> {
+        return publicacionService.agregarComentario(publicacionId, comentario)
     }
 
     @PutMapping("/change/description/{publicacionId}")
-    fun changeDescription(@PathVariable publicacionId: UUID, @RequestParam description: String): ResponseEntity<PublicacionResponse> {
-        return ResponseEntity
-            .status(HttpStatus.OK)
-            .body(publicacionService.cambiarDescripcionDePublicacion(publicacionId, description))
+    fun changeDescription(
+        @PathVariable publicacionId: String,
+        @RequestParam description: String
+    ): Mono<PublicacionResponse> {
+        return publicacionService.cambiarDescripcion(publicacionId, description)
+    }
+
+    @DeleteMapping("/{publicacionId}")
+    fun eliminarPublicacion(
+        @PathVariable publicacionId: String
+    ): Mono<Map<String, Boolean>> {
+        return publicacionService.eliminarPublicacion(publicacionId)
+            .map { mapOf("success" to it) }
     }
 }

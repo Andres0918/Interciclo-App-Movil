@@ -13,7 +13,12 @@ data class Publicacion(
 
     var likes: Int = 0,
 
-    var comentarios: MutableList<String> = mutableListOf()
+    var comentarios: MutableList<String> = mutableListOf(),
+
+    var imageUrl: String? = null,
+    var filterApplied: String? = null,
+    var createdAt: Long = System.currentTimeMillis()
+
 ) {
     // Constructor sin argumentos requerido por Firestore
     constructor() : this(

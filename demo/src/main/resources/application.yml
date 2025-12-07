@@ -5,6 +5,14 @@ spring:
 server:
   port: 8082
 
+firebase:
+  project-id: proyecto-cparalela
+  storage-bucket: proyecto-cparalela.firebasestorage.app
+
+cuda:
+  service:
+    url: http://192.168.18.47:5000
+
 eureka:
   client:
     service-url:
