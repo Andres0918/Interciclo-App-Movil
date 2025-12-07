@@ -1,9 +1,7 @@
 package com.compuinside.auth.controller;
 
-import com.compuinside.auth.jwt.AuthService;
-import com.compuinside.auth.user.Empresa;
+import com.compuinside.auth.jwt.FirebaseAuthService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -13,16 +11,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class EmpresaController {
 
-    private final AuthService authService;
+    private final FirebaseAuthService authService;
 
-    @PostMapping("/register")
-    public ResponseEntity<Empresa> registerEmpresa(@RequestBody EmpresaRequest request) {
-        Empresa empresa = authService.createEmpresa(request);
-        return ResponseEntity.ok(empresa);
-    }
-
-    @GetMapping("/obtener")
-    public List<Empresa> getAllEmpresas() {
-        return authService.getAllEmpresas();
-    }
 }

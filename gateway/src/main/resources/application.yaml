@@ -13,10 +13,10 @@ spring:
           filters:
             - JwtAuthFilter
         # 🔹 Microservicio Protegido (Ejemplo: Servicios médicos)
-        - id: doctor-module
-          uri: lb://doctor-module
+        - id: app-module
+          uri: lb://app-module
           predicates:
-            - Path=/med/**
+            - Path=/app/**
           filters:
             - JwtAuthFilter
       # 🔹 Microservicio Flask IA (sin Eureka, va con URL directa)

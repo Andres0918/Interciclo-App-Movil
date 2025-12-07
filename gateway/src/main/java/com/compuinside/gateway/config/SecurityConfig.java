@@ -17,7 +17,7 @@ public class SecurityConfig {
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .authorizeExchange(exchange -> exchange
                         .pathMatchers("/auth/**").permitAll()  // Permite autenticación sin token
-                        .pathMatchers("/med/**").permitAll()
+                        .pathMatchers("/app/**").permitAll()
                         // Requiere autenticación
                         .anyExchange().authenticated()  // Cualquier otra ruta necesita autenticación
                 )

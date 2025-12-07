@@ -1,66 +1,89 @@
 package com.compuinside.auth.controller;
 
-import com.compuinside.auth.jwt.JwtService;
-import com.compuinside.auth.jwt.AuthService;
-import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
 
-import java.util.UUID;
+import com.compuinside.auth.jwt.FirebaseAuthService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Mono;
+
+import java.util.Map;
 
 @RestController
 @RequestMapping("/auth")
 @RequiredArgsConstructor
+@Slf4j
 public class AuthController {
 
-    private final AuthService authService;
-    private final JwtService jwtService;
-
-    @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@RequestBody LoginRequest loginRequest) {
-        return ResponseEntity.ok(authService.login(loginRequest));
-    }
-
-    @PostMapping("/register-user")
-    public ResponseEntity<AuthResponse> registerwithAccount(@RequestBody AccountRequest registerRequest) {
-        return ResponseEntity.ok(authService.createUserWithExistingAccount(registerRequest));
-    }
+    private final FirebaseAuthService authService;
 
     @PostMapping("/register")
-    public ResponseEntity<AuthResponse> registerwithoutAccount(@RequestBody RegisterRequest registerRequest) {
-        return ResponseEntity.ok(authService.createUserWithNewAccount(registerRequest));
+    @ResponseStatus(HttpStatus.CREATED)
+    public Mono<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
+        log.info("POST /auth/register - Email: {}", request.getEmail());
+        return authService.register(request);
     }
 
-    @GetMapping("/getAppointments")
-    public ResponseEntity<String> getAppointmentsByDoctor(
-            @RequestHeader("userId") UUID doctorId, @RequestHeader("accountId") UUID accountId
-    ) {
-        System.out.println("UID: " + doctorId); // 👈 sigue saliendo en consola
-        return ResponseEntity.ok("UID Usuario: " + doctorId + "- UID Account: " + accountId); // 👈 se devuelve como respuesta HTTP
+    @PostMapping("/login")
+    public Mono<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
+        log.info("POST /auth/login - Email: {}", request.getEmail());
+        return authService.login(request);
     }
 
-    @GetMapping("/hello")
-    public String hello() {
-        return "holaaa";
+    @PostMapping("/verify")
+    public Mono<AuthResponse> verifyToken(@Valid @RequestBody VerifyTokenRequest request) {
+        log.info("POST /auth/verify");
+        return authService.verifyToken(request.getToken());
     }
 
-    /*@GetMapping("/validate")
-    public String validateToken(@RequestParam("token") String token) {
-        try {
-            authService.validateToken(token);
-            return "Token is valid";
-        } catch (Exception e) {
-            return "Token is invalid";
-        }
+    @GetMapping("/profile/{uid}")
+    public Mono<UserProfile> getProfile(@PathVariable String uid) {
+        log.info("GET /auth/profile/{}", uid);
+        return authService.getUserProfile(uid)
+                .switchIfEmpty(Mono.error(new RuntimeException("Usuario no encontrado")));
+    }
 
-    }*/
+    @PutMapping("/profile/{uid}")
+    public Mono<AuthResponse> updateProfile(
+            @PathVariable String uid,
+            @RequestBody Map<String, Object> updates) {
+        log.info("PUT /auth/profile/{}", uid);
+        return authService.updateUserProfile(uid, updates);
+    }
 
-    @PostMapping("/refresh")
-    public ResponseEntity<AuthResponse> refreshToken(@RequestHeader(HttpHeaders.AUTHORIZATION) String token) {
-        return ResponseEntity
-                .status(HttpStatus.OK)
-                .body(authService.refreshToken(token));
+    @DeleteMapping("/user/{uid}")
+    public Mono<AuthResponse> deleteUser(@PathVariable String uid) {
+        log.info("DELETE /auth/user/{}", uid);
+        return authService.deleteUser(uid);
+    }
+
+    @PostMapping("/user/{uid}/disable")
+    public Mono<AuthResponse> disableUser(@PathVariable String uid) {
+        log.info("POST /auth/user/{}/disable", uid);
+        return authService.disableUser(uid);
+    }
+
+    @PostMapping("/user/{uid}/enable")
+    public Mono<AuthResponse> enableUser(@PathVariable String uid) {
+        log.info("POST /auth/user/{}/enable", uid);
+        return authService.enableUser(uid);
+    }
+
+    @PostMapping("/send-verification")
+    public Mono<AuthResponse> sendEmailVerification(@RequestBody Map<String, String> request) {
+        String email = request.get("email");
+        log.info("POST /auth/send-verification - Email: {}", email);
+        return authService.sendEmailVerification(email);
+    }
+
+    @GetMapping("/health")
+    public Map<String, String> health() {
+        return Map.of(
+                "status", "UP",
+                "service", "auth-service",
+                "firebase", "connected"
+        );
     }
 }
