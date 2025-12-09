@@ -7,3 +7,6 @@ target/
 *.zip
 .m2/
 #xd
+
+# los feltros
+/filtros_py/filters/__pycache__/
