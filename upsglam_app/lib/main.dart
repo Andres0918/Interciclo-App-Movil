@@ -12,8 +12,10 @@ const String baseUrlGateway = 'http://10.0.2.2:8080';
 /// Auth-service directo (para registro)
 const String baseUrlAuthService = 'http://10.0.2.2:8081';
 
-/// Microservicio de publicaciones (muy probablemente 8082)
-const String baseUrlPosts = 'http://10.0.2.2:8082';
+/// Microservicio de publicaciones (feed de prueba)
+/// En PC:  http://localhost:8082/app/publicacion/feed
+/// En emulador:  http://10.0.2.2:8082/app/publicacion/feed
+const String baseUrlPosts = 'http://10.0.2.2:8082/app';
 
 void main() {
   runApp(const UpsGlamApp());
@@ -53,6 +55,7 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
+  // Aquí guardamos el correo (el back pide "email")
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
 
@@ -74,7 +77,7 @@ class _LoginScreenState extends State<LoginScreen> {
         uri,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'username': _usernameController.text.trim(),
+          'email': _usernameController.text.trim(),
           'password': _passwordController.text.trim(),
         }),
       );
@@ -82,19 +85,39 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+        final root = jsonDecode(response.body);
 
-        // La API responde { "token": "...", "refreshToken": "" }
-        final token = data['token'] as String?;
+        final success = root['success'] as bool? ?? false;
+        final message = root['message']?.toString() ?? 'Error desconocido';
+        final data = root['data'] as Map<String, dynamic>?;
 
-        if (token == null) {
+        if (!success || data == null) {
+          setState(() {
+            _errorMessage = message;
+          });
+          return;
+        }
+
+        final token = data['customToken'] as String?;
+        final displayName = data['displayName']?.toString();
+        final email = data['email']?.toString();
+        final role = data['role']?.toString();
+        final accountId = data['accountId']?.toString();
+
+        if (token == null || token.isEmpty) {
           setState(() {
             _errorMessage = 'No se encontró el token en la respuesta.';
           });
         } else {
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
-              builder: (_) => FeedScreen(token: token),
+              builder: (_) => FeedScreen(
+                token: token,
+                displayName: displayName,
+                email: email,
+                role: role,
+                accountId: accountId,
+              ),
             ),
           );
         }
@@ -176,12 +199,16 @@ class _LoginScreenState extends State<LoginScreen> {
                         TextFormField(
                           controller: _usernameController,
                           decoration: const InputDecoration(
-                            labelText: 'Usuario',
-                            prefixIcon: Icon(Icons.person_outline),
+                            labelText: 'Correo electrónico',
+                            prefixIcon: Icon(Icons.email_outlined),
                           ),
+                          keyboardType: TextInputType.emailAddress,
                           validator: (value) {
                             if (value == null || value.trim().isEmpty) {
-                              return 'Ingresa tu usuario';
+                              return 'Ingresa tu correo';
+                            }
+                            if (!value.contains('@')) {
+                              return 'Ingresa un correo válido';
                             }
                             return null;
                           },
@@ -298,10 +325,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'email': _emailController.text.trim(),
         'password': _passwordController.text.trim(),
         'username': _usernameController.text.trim(),
-        // Estos valores vienen del ejemplo de Postman
-        'role': 'DOCTOR',
-        'serviceClient': 'DOCTOR_MODULE',
-        'userPlan': 'BASIC',
       };
 
       final response = await http.post(
@@ -313,12 +336,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (!mounted) return;
 
       if (response.statusCode == 200 || response.statusCode == 201) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Registro exitoso. Ahora inicia sesión.'),
-          ),
-        );
-        Navigator.of(context).pop(); // Volver a login
+        final root = jsonDecode(response.body);
+        final success = root['success'] as bool? ?? false;
+        final message = root['message']?.toString() ??
+            'Registro completado. Ahora inicia sesión.';
+
+        if (success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(message)),
+          );
+          Navigator.of(context).pop(); // Volver a login
+        } else {
+          setState(() {
+            _errorMessage = message;
+          });
+        }
       } else {
         setState(() {
           _errorMessage =
@@ -485,6 +517,9 @@ class Post {
   final String? imageUrl;
   final int likesCount;
   final String? author;
+  final String? filterApplied;
+  final int? createdAt;
+  final List<String> comments;
 
   Post({
     required this.id,
@@ -492,37 +527,57 @@ class Post {
     this.imageUrl,
     required this.likesCount,
     this.author,
+    this.filterApplied,
+    this.createdAt,
+    this.comments = const [],
   });
 
   factory Post.fromJson(Map<String, dynamic> json) {
-    final id = (json['id'] ??
-            json['postId'] ??
-            json['publicacionId'] ??
-            json['uuid'] ??
-            '')
-        .toString();
+    // Estructura del feed de prueba:
+    // {
+    //   "uuid": "...",
+    //   "accountId": "...",
+    //   "description": "aqui culeando",
+    //   "imageUrl": "https://...jpg",
+    //   "filterApplied": "emboss",
+    //   "likes": 1,
+    //   "comentarios": ["xddd"],
+    //   "createdAt": 1765108080043
+    // }
 
-    final description =
-        (json['description'] ?? json['descripcion'] ?? json['texto'] ?? '')
-            .toString();
+    final id = (json['uuid'] ?? json['id'] ?? '').toString();
+    final description = (json['description'] ?? '').toString();
+    final imageUrl = json['imageUrl']?.toString();
 
-    final imageUrl =
-        (json['imageUrl'] ?? json['urlImagen'] ?? json['url'] ?? null)
-            ?.toString();
-
-    final likes =
-        json['likesCount'] ?? json['likes'] ?? json['numeroLikes'] ?? 0;
+    final likesRaw = json['likes'] ?? json['likesCount'] ?? 0;
+    final likes = (likesRaw is int)
+        ? likesRaw
+        : int.tryParse(likesRaw.toString()) ?? 0;
 
     final author =
         (json['author'] ?? json['usuario'] ?? json['username'] ?? null)
             ?.toString();
 
+    final filterApplied = json['filterApplied']?.toString();
+    final createdAtRaw = json['createdAt'];
+    final createdAt = (createdAtRaw is int)
+        ? createdAtRaw
+        : int.tryParse(createdAtRaw?.toString() ?? '');
+
+    final comentariosRaw = json['comentarios'];
+    final comments = (comentariosRaw is List)
+        ? comentariosRaw.map((e) => e.toString()).toList()
+        : <String>[];
+
     return Post(
       id: id,
       description: description,
       imageUrl: imageUrl,
-      likesCount: (likes is int) ? likes : int.tryParse(likes.toString()) ?? 0,
+      likesCount: likes,
       author: author,
+      filterApplied: filterApplied,
+      createdAt: createdAt,
+      comments: comments,
     );
   }
 }
@@ -533,8 +588,19 @@ class Post {
 
 class FeedScreen extends StatefulWidget {
   final String token;
+  final String? displayName;
+  final String? email;
+  final String? role;
+  final String? accountId;
 
-  const FeedScreen({super.key, required this.token});
+  const FeedScreen({
+    super.key,
+    required this.token,
+    this.displayName,
+    this.email,
+    this.role,
+    this.accountId,
+  });
 
   @override
   State<FeedScreen> createState() => _FeedScreenState();
@@ -558,19 +624,15 @@ class _FeedScreenState extends State<FeedScreen> {
     });
 
     try {
-      // ⚠️ Ahora usamos el microservicio de publicaciones
-      final uri = Uri.parse('$baseUrlPosts/publicacion/obtener/all');
-
-      final rawToken = widget.token.trim();
-      final authHeader = rawToken.toLowerCase().startsWith('bearer ')
-          ? rawToken
-          : 'Bearer $rawToken';
+      // Usamos el endpoint de pruebas:
+      // GET http://10.0.2.2:8082/app/publicacion/feed
+      final uri = Uri.parse('$baseUrlPosts/publicacion/feed');
 
       final response = await http.get(
         uri,
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': authHeader,
+          // Por ahora este endpoint de pruebas no valida token
         },
       );
 
@@ -594,11 +656,6 @@ class _FeedScreenState extends State<FeedScreen> {
 
         setState(() {
           _posts = posts;
-        });
-      } else if (response.statusCode == 401) {
-        setState(() {
-          _errorMessage =
-              'No autorizado (401) desde microservicio.\nRevisa el token o el rol en el back.';
         });
       } else {
         setState(() {
@@ -628,7 +685,9 @@ class _FeedScreenState extends State<FeedScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Feed UPSGlam'),
+        title: Text(widget.displayName != null
+            ? 'Feed UPSGlam - ${widget.displayName}'
+            : 'Feed UPSGlam'),
         actions: [
           IconButton(
             onPressed: _fetchPosts,
@@ -731,6 +790,7 @@ class _PostCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Si tuvieras autor, aquí se muestra
                 if (post.author != null && post.author!.isNotEmpty)
                   Text(
                     post.author!,
@@ -755,6 +815,16 @@ class _PostCard extends StatelessWidget {
                     Text('${post.likesCount} likes'),
                   ],
                 ),
+                if (post.filterApplied != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Filtro: ${post.filterApplied}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
