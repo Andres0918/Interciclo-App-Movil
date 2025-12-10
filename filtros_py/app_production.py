@@ -232,17 +232,19 @@ def process_gpu():
         }
         
         # --- AÑADIR ARGUMENTOS ESPECÍFICOS ---
-        if filter_name in ['sticker_overlay', 'sticker']:
-            
-            # Sticker Principal Path
+        if filter_name in ['sticker']:
             sticker_path_default = filter_instance.get_parameters()['sticker_img_path']['default']
             sticker_path = request.form.get('sticker_img_path', sticker_path_default)
             process_gpu_args['sticker_img_path'] = sticker_path
+            target_x = int(request.form.get('target_x', filter_instance.get_parameters()['target_x']['default']))
+            target_y = int(request.form.get('target_y', filter_instance.get_parameters()['target_y']['default']))
+            target_w = int(request.form.get('target_w', filter_instance.get_parameters()['target_w']['default']))
+            target_h = int(request.form.get('target_h', filter_instance.get_parameters()['target_h']['default']))
             
-            # Footer Sticker Path
-            footer_path_default = filter_instance.get_parameters()['footer_img_path']['default']
-            footer_path = request.form.get('footer_img_path', footer_path_default)
-            process_gpu_args['footer_img_path'] = footer_path
+            process_gpu_args['target_x'] = target_x
+            process_gpu_args['target_y'] = target_y
+            process_gpu_args['target_w'] = target_w
+            process_gpu_args['target_h'] = target_h
 
         if filter_name in ['depth_of_field', 'depth_of_field_duotone']:
             # El filtro se encarga de calcular el 50% central si todos son 0.
