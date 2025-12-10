@@ -10,3 +10,6 @@ target/
 
 # los feltros
 /filtros_py/filters/__pycache__/
+
+auth/src/main/resources/firebase-credentials.json
+demo/src/main/resources/firebase-credentials.json
