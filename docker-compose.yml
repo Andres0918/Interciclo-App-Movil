@@ -116,6 +116,27 @@ services:
     networks:
       - app-network
     restart: on-failure
+  
+  # ============================================
+  # SERVICIO DE FILTROS (PYTHON)
+  # ============================================
+  filter-service:
+    build:
+      context: ./filtros_py
+      dockerfile: Dockerfile
+    container_name: app-filter-svc
+    ports:
+      - "5000:5000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    networks:
+      - app-network
 
 # ============================================
 # VOLÚMENES PERSISTENTES

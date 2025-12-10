@@ -2,12 +2,10 @@ FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
 
 LABEL authors="eduardo"
 
-RUN apt-get update && apt-get install -y \
-    python3-pip \
-    build-essential \
-    libglib2.0-0 \
-    libglib2.0-dev \
-    libgl1-mesa-glx \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        python3 python3-dev python3-pip python3-venv \
+        build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install \
@@ -16,8 +14,7 @@ RUN pip3 install \
     flask_cors \
     numpy \
     pillow \
-    werkzeug \
-    opencv-python-headless
+    werkzeug
 
 COPY . /app
 WORKDIR /app
