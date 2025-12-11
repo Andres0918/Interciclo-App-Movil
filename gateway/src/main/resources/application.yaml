@@ -11,21 +11,21 @@ spring:
           predicates:
             - Path=/auth/**
           filters:
-            - JwtAuthFilter
+            - FirebaseAuthFilter
         # 🔹 Microservicio Protegido (Ejemplo: Servicios médicos)
         - id: app-module
           uri: lb://app-module
           predicates:
             - Path=/app/**
           filters:
-            - JwtAuthFilter
+            - FirebaseAuthFilter
       # 🔹 Microservicio Flask IA (sin Eureka, va con URL directa)
         - id: flask-ml
           uri: http://flask-ml-service:5000
           predicates:
             - Path=/predict/**
           filters:
-            - JwtAuthFilter
+            - FirebaseAuthFilter
 
 
 
