@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1097167110028",
+    "project_id": "proyecto-cparalela",
+    "storage_bucket": "proyecto-cparalela.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1097167110028:android:7e08e78666877c621020a9",
+        "android_client_info": {
+          "package_name": "com.example.upsglam_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBp8nMwg_DWVVKr-THun92h2dIDbdcnM7A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
