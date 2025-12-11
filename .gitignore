@@ -15,3 +15,7 @@ auth/src/main/resources/firebase-credentials.json
 demo/src/main/resources/firebase-credentials.json
 gateway/src/main/resources/firebase-credentials.json
 
+# Firebase credentials
+gateway/src/main/resources/firebase-credentials.json
+**/firebase-credentials.json
+**/firebase-service-account.json
