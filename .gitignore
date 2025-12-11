@@ -13,3 +13,5 @@ target/
 
 auth/src/main/resources/firebase-credentials.json
 demo/src/main/resources/firebase-credentials.json
+gateway/src/main/resources/firebase-credentials.json
+
