@@ -1,13 +1,27 @@
 import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:image_picker/image_picker.dart';
+
 import 'firebase_options.dart';
 
 ///  IMPORTANTE:
 /// 10.0.2.2 = "localhost" visto desde el emulador Android.
 const String baseUrlGateway = 'http://10.0.2.2:8080';
+
+/// Filtros disponibles en el backend
+const List<String> kAvailableFilters = [
+  'blur',
+  'laplace',
+  'emboss',
+  'gaussiano',
+  'extra',
+  'sticker',
+];
 
 // ============================================================
 // MAIN - Inicializar Firebase ANTES de runApp
@@ -51,7 +65,8 @@ class AuthService {
         }),
       );
 
-      print(' Response: ${response.statusCode}');
+      print(' Response registro: ${response.statusCode}');
+      print(' Body registro: ${response.body}');
 
       if (response.statusCode == 201 || response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -59,14 +74,18 @@ class AuthService {
         if (data['success'] == true) {
           final customToken = data['data']['customToken'] as String;
 
-          print(' Autenticando en Firebase...');
-          final userCredential = await _auth.signInWithCustomToken(customToken);
+          print(' Autenticando en Firebase (registro)…');
+          final userCredential =
+              await _auth.signInWithCustomToken(customToken);
 
           print('✅ Usuario registrado: ${userCredential.user?.email}');
 
           return {'success': true, 'user': userCredential.user};
         } else {
-          return {'success': false, 'error': data['error'] ?? 'Error al registrar'};
+          return {
+            'success': false,
+            'error': data['error'] ?? 'Error al registrar',
+          };
         }
       }
 
@@ -94,7 +113,8 @@ class AuthService {
         }),
       );
 
-      print(' Response: ${response.statusCode}');
+      print(' Response login: ${response.statusCode}');
+      print(' Body login: ${response.body}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -103,14 +123,18 @@ class AuthService {
           final customToken = data['data']['customToken'] as String;
 
           // ✅ Autenticar en Firebase con custom token
-          print(' Autenticando en Firebase...');
-          final userCredential = await _auth.signInWithCustomToken(customToken);
+          print(' Autenticando en Firebase (login)…');
+          final userCredential =
+              await _auth.signInWithCustomToken(customToken);
 
           print('✅ Login exitoso: ${userCredential.user?.email}');
 
           return {'success': true, 'user': userCredential.user};
         } else {
-          return {'success': false, 'error': data['error'] ?? 'Credenciales inválidas'};
+          return {
+            'success': false,
+            'error': data['error'] ?? 'Credenciales inválidas',
+          };
         }
       }
 
@@ -145,12 +169,81 @@ class AuthService {
 }
 
 // ============================================================
+// MODELO POST
+// ============================================================
+class Post {
+  final String id;
+  final String description;
+  final String? imageUrl;
+  int likesCount; // mutable para actualizar en UI
+  final String? author;
+  final String? filterApplied;
+  final int? createdAt;
+  final List<String> comments; // mantenemos lista
+  bool likedByMe; // estado local de like
+
+  Post({
+    required this.id,
+    required this.description,
+    this.imageUrl,
+    required this.likesCount,
+    this.author,
+    this.filterApplied,
+    this.createdAt,
+    List<String>? comments,
+    this.likedByMe = false,
+  }) : comments = comments ?? [];
+
+  factory Post.fromJson(Map<String, dynamic> json) {
+    final id = (json['uuid'] ?? json['id'] ?? '').toString();
+    final description = (json['description'] ?? '').toString();
+    final imageUrl = json['imageUrl']?.toString();
+
+    final likesRaw = json['likes'] ?? json['likesCount'] ?? 0;
+    final likes = (likesRaw is int)
+        ? likesRaw
+        : int.tryParse(likesRaw.toString()) ?? 0;
+
+    final author =
+        (json['author'] ?? json['usuario'] ?? json['username'])?.toString();
+    final filterApplied = json['filterApplied']?.toString();
+
+    final createdAtRaw = json['createdAt'];
+    final createdAt = (createdAtRaw is int)
+        ? createdAtRaw
+        : int.tryParse(createdAtRaw?.toString() ?? '');
+
+    final comentariosRaw = json['comentarios'];
+    final comments = (comentariosRaw is List)
+        ? comentariosRaw.map((e) => e.toString()).toList()
+        : <String>[];
+
+    // Si en algún momento el backend manda "likedByCurrentUser", se puede leer aquí.
+    final likedByMeRaw = json['likedByMe'] ?? json['likedByCurrentUser'];
+    final likedByMe = likedByMeRaw == true;
+
+    return Post(
+      id: id,
+      description: description,
+      imageUrl: imageUrl,
+      likesCount: likes,
+      author: author,
+      filterApplied: filterApplied,
+      createdAt: createdAt,
+      comments: comments,
+      likedByMe: likedByMe,
+    );
+  }
+}
+
+// ============================================================
 // API SERVICE - Requests al backend con autenticación
 // ============================================================
 class ApiService {
   final AuthService _authService = AuthService();
 
-  Future<List<dynamic>> getFeed() async {
+  /// Obtener feed de publicaciones
+  Future<List<Post>> getFeed() async {
     try {
       final idToken = await _authService.getIdToken();
 
@@ -165,10 +258,14 @@ class ApiService {
       );
 
       print(' Feed response: ${response.statusCode}');
+      print(' Feed body: ${response.body}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return data is List ? data : [];
+        final list = (data is List) ? data : <dynamic>[];
+        return list
+            .map((json) => Post.fromJson(json as Map<String, dynamic>))
+            .toList();
       }
       return [];
     } catch (e) {
@@ -177,20 +274,125 @@ class ApiService {
     }
   }
 
-  Future<bool> darLike(String publicacionId) async {
+  /// Dar like a una publicación
+  Future<bool> addLike(String publicacionId) async {
     try {
       final idToken = await _authService.getIdToken();
+      if (idToken == null) return false;
+
+      final uri = Uri.parse(
+        '$baseUrlGateway/app/publicacion/add/like?publicacionId=$publicacionId',
+      );
 
       final response = await http.put(
-        Uri.parse('$baseUrlGateway/app/publicacion/add/like?publicacionId=$publicacionId'),
+        uri,
         headers: {
-          if (idToken != null) 'Authorization': 'Bearer $idToken',
+          'Authorization': 'Bearer $idToken',
         },
       );
 
+      print(' addLike(${publicacionId}) => ${response.statusCode}');
       return response.statusCode == 200;
     } catch (e) {
       print(' Error dando like: $e');
+      return false;
+    }
+  }
+
+  /// Quitar like a una publicación
+  Future<bool> quitLike(String publicacionId) async {
+    try {
+      final idToken = await _authService.getIdToken();
+      if (idToken == null) return false;
+
+      final uri = Uri.parse(
+        '$baseUrlGateway/app/publicacion/quit/like?publicacionId=$publicacionId',
+      );
+
+      final response = await http.put(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $idToken',
+        },
+      );
+
+      print(' quitLike(${publicacionId}) => ${response.statusCode}');
+      return response.statusCode == 200;
+    } catch (e) {
+      print(' Error quitando like: $e');
+      return false;
+    }
+  }
+
+  /// Comentar publicación
+  Future<bool> comentarPublicacion({
+    required String postId,
+    required String comentario,
+  }) async {
+    try {
+      final idToken = await _authService.getIdToken();
+      if (idToken == null) return false;
+
+      final uri = Uri.parse(
+        '$baseUrlGateway/app/publicacion/comment/post/$postId',
+      ).replace(queryParameters: {
+        'comentario': comentario,
+      });
+
+      final response = await http.post(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $idToken',
+        },
+      );
+
+      print(
+          ' comentarPublicacion($postId, "$comentario") => ${response.statusCode}');
+      print(' Body comentar: ${response.body}');
+
+      return response.statusCode == 200 || response.statusCode == 201;
+    } catch (e) {
+      print(' Error comentando publicación: $e');
+      return false;
+    }
+  }
+
+  /// Crear una nueva publicación con imagen + filtro
+  Future<bool> crearPublicacion({
+    required String descripcion,
+    required String filter,
+    required File imagen,
+  }) async {
+    try {
+      final idToken = await _authService.getIdToken();
+      if (idToken == null) {
+        print(' No hay usuario autenticado, no se puede crear la publicación');
+        return false;
+      }
+
+      print(' Creando publicación…');
+
+      final uri = Uri.parse('$baseUrlGateway/app/publicacion');
+
+      final request = http.MultipartRequest('POST', uri);
+      request.headers['Authorization'] = 'Bearer $idToken';
+
+      request.fields['descripcion'] = descripcion;
+      request.fields['filter'] = filter; // ej. "blur" / "laplace" / etc.
+
+      request.files.add(
+        await http.MultipartFile.fromPath('imagen', imagen.path),
+      );
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      print(' Crear publicación response: ${response.statusCode}');
+      print(' Body: ${response.body}');
+
+      return response.statusCode == 200 || response.statusCode == 201;
+    } catch (e) {
+      print(' Error creando publicación: $e');
       return false;
     }
   }
@@ -358,12 +560,14 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             child: Row(
                               children: [
-                                const Icon(Icons.error_outline, color: Colors.red, size: 18),
+                                const Icon(Icons.error_outline,
+                                    color: Colors.red, size: 18),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
                                     _errorMessage!,
-                                    style: const TextStyle(color: Colors.red, fontSize: 12),
+                                    style: const TextStyle(
+                                        color: Colors.red, fontSize: 12),
                                   ),
                                 ),
                               ],
@@ -377,10 +581,11 @@ class _LoginScreenState extends State<LoginScreen> {
                             onPressed: _isLoading ? null : _login,
                             child: _isLoading
                                 ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  )
                                 : const Text('Iniciar sesión'),
                           ),
                         ),
@@ -391,7 +596,8 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 16),
               TextButton(
-                onPressed: () => Navigator.of(context).pushNamed('/register'),
+                onPressed: () =>
+                    Navigator.of(context).pushNamed('/register'),
                 child: const Text('¿No tienes cuenta? Regístrate aquí'),
               ),
             ],
@@ -472,7 +678,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         padding: const EdgeInsets.all(24.0),
         child: Card(
           elevation: 2,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: Padding(
             padding: const EdgeInsets.all(16.0),
             child: Form(
@@ -481,7 +688,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 children: [
                   const Text(
                     'Regístrate en UPSGlam',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                    style:
+                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -544,12 +752,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.error_outline, color: Colors.red, size: 18),
+                          const Icon(Icons.error_outline,
+                              color: Colors.red, size: 18),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               _errorMessage!,
-                              style: const TextStyle(color: Colors.red, fontSize: 12),
+                              style: const TextStyle(
+                                  color: Colors.red, fontSize: 12),
                             ),
                           ),
                         ],
@@ -563,10 +773,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       onPressed: _isLoading ? null : _register,
                       child: _isLoading
                           ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2),
+                            )
                           : const Text('Crear cuenta'),
                     ),
                   ),
@@ -581,57 +792,208 @@ class _RegisterScreenState extends State<RegisterScreen> {
 }
 
 // ============================================================
-// MODELO POST
+// NEW POST SCREEN (CREAR PUBLICACIÓN)
 // ============================================================
-class Post {
-  final String id;
-  final String description;
-  final String? imageUrl;
-  final int likesCount;
-  final String? author;
-  final String? filterApplied;
-  final int? createdAt;
-  final List<String> comments;
+class NewPostScreen extends StatefulWidget {
+  const NewPostScreen({super.key});
 
-  Post({
-    required this.id,
-    required this.description,
-    this.imageUrl,
-    required this.likesCount,
-    this.author,
-    this.filterApplied,
-    this.createdAt,
-    this.comments = const [],
-  });
+  @override
+  State<NewPostScreen> createState() => _NewPostScreenState();
+}
 
-  factory Post.fromJson(Map<String, dynamic> json) {
-    final id = (json['uuid'] ?? json['id'] ?? '').toString();
-    final description = (json['description'] ?? '').toString();
-    final imageUrl = json['imageUrl']?.toString();
+class _NewPostScreenState extends State<NewPostScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _descripcionController = TextEditingController();
+  final _apiService = ApiService();
+  final ImagePicker _picker = ImagePicker();
 
-    final likesRaw = json['likes'] ?? json['likesCount'] ?? 0;
-    final likes = (likesRaw is int) ? likesRaw : int.tryParse(likesRaw.toString()) ?? 0;
+  String? _selectedFilter;
+  File? _selectedImage;
+  bool _isSubmitting = false;
+  String? _errorMessage;
 
-    final author = (json['author'] ?? json['usuario'] ?? json['username'])?.toString();
-    final filterApplied = json['filterApplied']?.toString();
+  Future<void> _pickImage() async {
+    try {
+      final picked = await _picker.pickImage(source: ImageSource.gallery);
+      if (picked != null) {
+        setState(() {
+          _selectedImage = File(picked.path);
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error al seleccionar imagen: $e';
+      });
+    }
+  }
 
-    final createdAtRaw = json['createdAt'];
-    final createdAt = (createdAtRaw is int) ? createdAtRaw : int.tryParse(createdAtRaw?.toString() ?? '');
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_selectedImage == null) {
+      setState(() {
+        _errorMessage = 'Selecciona una imagen para la publicación.';
+      });
+      return;
+    }
+    if (_selectedFilter == null) {
+      setState(() {
+        _errorMessage = 'Selecciona un filtro a aplicar.';
+      });
+      return;
+    }
 
-    final comentariosRaw = json['comentarios'];
-    final comments = (comentariosRaw is List)
-        ? comentariosRaw.map((e) => e.toString()).toList()
-        : <String>[];
+    setState(() {
+      _isSubmitting = true;
+      _errorMessage = null;
+    });
 
-    return Post(
-      id: id,
-      description: description,
-      imageUrl: imageUrl,
-      likesCount: likes,
-      author: author,
-      filterApplied: filterApplied,
-      createdAt: createdAt,
-      comments: comments,
+    final ok = await _apiService.crearPublicacion(
+      descripcion: _descripcionController.text.trim(),
+      filter: _selectedFilter!,
+      imagen: _selectedImage!,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _isSubmitting = false;
+    });
+
+    if (ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Publicación creada correctamente')),
+      );
+      Navigator.of(context).pop(true); // true => recargar feed
+    } else {
+      setState(() {
+        _errorMessage = 'No se pudo crear la publicación.';
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _descripcionController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Nueva publicación'),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (_selectedImage != null)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Image.file(
+                    _selectedImage!,
+                    height: 250,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                  ),
+                )
+              else
+                GestureDetector(
+                  onTap: _pickImage,
+                  child: Container(
+                    height: 200,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Center(
+                      child: Icon(Icons.add_a_photo, size: 40),
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: _pickImage,
+                  icon: const Icon(Icons.photo),
+                  label: const Text('Seleccionar imagen'),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _descripcionController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Descripción',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Ingresa una descripción';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                decoration: const InputDecoration(
+                  labelText: 'Filtro a aplicar',
+                  border: OutlineInputBorder(),
+                ),
+                value: _selectedFilter,
+                items: kAvailableFilters
+                    .map(
+                      (f) => DropdownMenuItem(
+                        value: f,
+                        child: Text(f),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  setState(() {
+                    _selectedFilter = value;
+                  });
+                },
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Selecciona un filtro';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              if (_errorMessage != null) ...[
+                Text(
+                  _errorMessage!,
+                  style: const TextStyle(color: Colors.red),
+                ),
+                const SizedBox(height: 8),
+              ],
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _isSubmitting ? null : _submit,
+                  icon: _isSubmitting
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.send),
+                  label: Text(
+                    _isSubmitting ? 'Publicando...' : 'Publicar',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -654,6 +1016,10 @@ class _FeedScreenState extends State<FeedScreen> {
   String? _errorMessage;
   List<Post> _posts = [];
 
+  /// Para evitar spam de likes/comentarios en el mismo post
+  final Set<String> _processingLikes = {};
+  final Set<String> _processingComments = {};
+
   @override
   void initState() {
     super.initState();
@@ -670,7 +1036,7 @@ class _FeedScreenState extends State<FeedScreen> {
       final posts = await _apiService.getFeed();
 
       setState(() {
-        _posts = posts.map((json) => Post.fromJson(json)).toList();
+        _posts = posts;
       });
     } catch (e) {
       setState(() {
@@ -688,7 +1054,130 @@ class _FeedScreenState extends State<FeedScreen> {
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginScreen()),
-            (route) => false,
+        (route) => false,
+      );
+    }
+  }
+
+  Future<void> _goToNewPost() async {
+    final created = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => const NewPostScreen()),
+    );
+
+    if (created == true) {
+      _fetchPosts();
+    }
+  }
+
+  Future<void> _toggleLike(Post post) async {
+    if (_processingLikes.contains(post.id)) return;
+
+    setState(() {
+      _processingLikes.add(post.id);
+      // Optimista: invertimos de una
+      if (post.likedByMe) {
+        post.likedByMe = false;
+        post.likesCount = (post.likesCount - 1).clamp(0, 999999);
+      } else {
+        post.likedByMe = true;
+        post.likesCount++;
+      }
+    });
+
+    final wasLiked = !post.likedByMe; // estado previo real
+
+    bool ok;
+    if (wasLiked) {
+      // Antes estaba liked, ahora queremos quitLike
+      ok = await _apiService.quitLike(post.id);
+    } else {
+      ok = await _apiService.addLike(post.id);
+    }
+
+    if (!ok && mounted) {
+      // Revertir si falló
+      setState(() {
+        if (wasLiked) {
+          // debía quedar liked y falló -> devolver like
+          post.likedByMe = true;
+          post.likesCount++;
+        } else {
+          post.likedByMe = false;
+          post.likesCount = (post.likesCount - 1).clamp(0, 999999);
+        }
+      });
+    }
+
+    if (mounted) {
+      setState(() {
+        _processingLikes.remove(post.id);
+      });
+    }
+  }
+
+  Future<void> _showCommentDialog(Post post) async {
+    if (_processingComments.contains(post.id)) return;
+
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Nuevo comentario'),
+          content: TextField(
+            controller: controller,
+            maxLines: 3,
+            decoration: const InputDecoration(
+              hintText: 'Escribe tu comentario...',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(null),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final text = controller.text.trim();
+                if (text.isEmpty) return;
+                Navigator.of(context).pop(text);
+              },
+              child: const Text('Comentar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result == null || result.trim().isEmpty) return;
+
+    final comentario = result.trim();
+
+    setState(() {
+      _processingComments.add(post.id);
+    });
+
+    final ok = await _apiService.comentarPublicacion(
+      postId: post.id,
+      comentario: comentario,
+    );
+
+    if (mounted) {
+      setState(() {
+        _processingComments.remove(post.id);
+        if (ok) {
+          post.comments.add(comentario);
+        }
+      });
+    }
+
+    if (ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Comentario enviado')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo comentar')),
       );
     }
   }
@@ -705,6 +1194,11 @@ class _FeedScreenState extends State<FeedScreen> {
             onPressed: _fetchPosts,
             icon: const Icon(Icons.refresh),
             tooltip: 'Actualizar',
+          ),
+          IconButton(
+            onPressed: _goToNewPost,
+            icon: const Icon(Icons.add_a_photo_outlined),
+            tooltip: 'Nueva publicación',
           ),
           IconButton(
             onPressed: _logout,
@@ -738,7 +1232,7 @@ class _FeedScreenState extends State<FeedScreen> {
     if (_posts.isEmpty) {
       return const Center(
         child: Text(
-          'Aún no hay publicaciones.\nCrea la primera publicación!',
+          'Aún no hay publicaciones.\n¡Crea la primera publicación!',
           textAlign: TextAlign.center,
         ),
       );
@@ -751,7 +1245,16 @@ class _FeedScreenState extends State<FeedScreen> {
         itemCount: _posts.length,
         itemBuilder: (context, index) {
           final post = _posts[index];
-          return _PostCard(post: post);
+          final isLiking = _processingLikes.contains(post.id);
+          final isCommenting = _processingComments.contains(post.id);
+
+          return _PostCard(
+            post: post,
+            isLiking: isLiking,
+            isCommenting: isCommenting,
+            onToggleLike: () => _toggleLike(post),
+            onComment: () => _showCommentDialog(post),
+          );
         },
       ),
     );
@@ -763,14 +1266,25 @@ class _FeedScreenState extends State<FeedScreen> {
 // ============================================================
 class _PostCard extends StatelessWidget {
   final Post post;
+  final bool isLiking;
+  final bool isCommenting;
+  final VoidCallback onToggleLike;
+  final VoidCallback onComment;
 
-  const _PostCard({required this.post});
+  const _PostCard({
+    required this.post,
+    required this.isLiking,
+    required this.isCommenting,
+    required this.onToggleLike,
+    required this.onComment,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -800,7 +1314,10 @@ class _PostCard extends StatelessWidget {
               ),
             ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12.0,
+              vertical: 8.0,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -815,18 +1332,39 @@ class _PostCard extends StatelessWidget {
                 if (post.author != null && post.author!.isNotEmpty)
                   const SizedBox(height: 4),
                 Text(
-                  post.description.isEmpty ? '(Sin descripción)' : post.description,
+                  post.description.isEmpty
+                      ? '(Sin descripción)'
+                      : post.description,
                   style: const TextStyle(fontSize: 14),
                 ),
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    const Icon(Icons.favorite_border, size: 18),
-                    const SizedBox(width: 4),
+                    IconButton(
+                      onPressed: isLiking ? null : onToggleLike,
+                      icon: Icon(
+                        post.likedByMe
+                            ? Icons.favorite
+                            : Icons.favorite_border,
+                      ),
+                      color: post.likedByMe ? Colors.red : null,
+                      tooltip: post.likedByMe
+                          ? 'Quitar like'
+                          : 'Me gusta',
+                    ),
                     Text('${post.likesCount} likes'),
+                    const SizedBox(width: 16),
+                    IconButton(
+                      onPressed: isCommenting ? null : onComment,
+                      icon: const Icon(Icons.mode_comment_outlined),
+                      tooltip: 'Comentar',
+                    ),
+                    if (post.comments.isNotEmpty)
+                      Text('${post.comments.length} coments'),
                   ],
                 ),
-                if (post.filterApplied != null) ...[
+                if (post.filterApplied != null &&
+                    post.filterApplied!.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(
                     'Filtro: ${post.filterApplied}',
@@ -835,6 +1373,35 @@ class _PostCard extends StatelessWidget {
                       color: Colors.grey,
                     ),
                   ),
+                ],
+                if (post.comments.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Comentarios:',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  // Mostrar hasta 2 comentarios como preview
+                  ...post.comments
+                      .take(2)
+                      .map(
+                        (c) => Text(
+                          '• $c',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      )
+                      .toList(),
+                  if (post.comments.length > 2)
+                    Text(
+                      '+${post.comments.length - 2} más...',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey,
+                      ),
+                    ),
                 ],
               ],
             ),
