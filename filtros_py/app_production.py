@@ -20,7 +20,7 @@ cuda.init()
 
 device = cuda.Device(0)
 print(f"✅ Dispositivo: {device.name()}")
-print(f"   Compute Capability: {device.compute_capability()}")
+print(f"   Compute Capability: {device.compute_capability()}")
 
 ctx = pycuda.tools.make_default_context()
 print(f"✅ Contexto CUDA creado (auto-managed)")
@@ -37,11 +37,10 @@ filter_instances = {}
 for filter_info in FilterFactory.get_available_filters():
     filter_name = filter_info['name']
     try:
-        # Crea la instancia y la guarda solo si la inicialización (compilación CUDA) fue exitosa
         filter_instances[filter_name] = FilterFactory.create_filter(filter_name)
-        print(f"   {filter_name}: Pre-compilado")
+        print(f"   {filter_name}: Pre-compilado")
     except Exception as e:
-        print(f"   ❌ {filter_name}: Error al compilar/cargar: {str(e)[:80]}")
+        print(f"   ❌ {filter_name}: Error al compilar/cargar: {str(e)[:80]}")
 
 
 app = Flask(__name__)
@@ -61,7 +60,7 @@ available_filters = [
 ]
 print(f"✅ Filtros cargados: {len(available_filters)}")
 for f in available_filters:
-    print(f"   • {f['name']}: {f['description']}")
+    print(f"   • {f['name']}: {f['description']}")
 
 
 # Cleanup
@@ -163,7 +162,6 @@ def list_filters():
     })
 
 
-
 @app.route('/process/gpu', methods=['POST'])
 def process_gpu():
     ctx.push()
@@ -188,42 +186,42 @@ def process_gpu():
             }), 400
 
         filter_instance = filter_instances[filter_name]
-        
+        filter_params = filter_instance.get_parameters()
         
         image_data = file.read()
         
-        if filter_name in ['sticker_overlay', 'sticker', 'depth_of_field', 'depth_of_field_duotone']:
+        color_filters = ['sticker_overlay', 'sticker', 'depth_of_field', 'depth_of_field_duotone', 'blur']
+        
+        if filter_name in color_filters:
             image, _ = load_image_color(image_data)
         else:
             image, _ = load_image_grayscale(image_data)
         
-        # 3. Determinar W, H
         if len(image.shape) == 3:
             H, W, C = image.shape
         else:
             H, W = image.shape
             C = 1
 
-        # 4. Obtener kernel_size (Seguro)
-        kernel_size = 7
+        kernel_size = int(request.form.get('kernel_size', 
+                          filter_params.get('kernel_size', {}).get('default', 7)))
         
-        # 5. Generar kernel (Dummy para StickerFilter, Real para Convolución/Duotono)
-        kernel = filter_instance.generate_kernel(kernel_size)
+        kernel_args = {'kernel_size': kernel_size}
         
-        # 6. Configurar el Grid/Block
+        if filter_name == 'blur':
+            sigma = float(request.form.get('sigma', 
+                         filter_params.get('sigma', {}).get('default', 1.0)))
+            kernel_args['sigma'] = sigma
+        
+        try:
+            kernel = filter_instance.generate_kernel(**kernel_args)
+        except TypeError:
+            kernel = filter_instance.generate_kernel(kernel_size)
+        
         block_size = int(request.form.get('block_size', 16))
         block_config = (block_size, block_size, 1)
+        grid_config = ((W + block_size - 1) // block_size, (H + block_size - 1) // block_size)
 
-        # Determinar Grid basado en el tipo de filtro
-        if filter_name in ['sticker_overlay', 'sticker', 'depth_of_field', 'depth_of_field_duotone']:
-             grid_config = ((W + block_size - 1) // block_size, (H + block_size - 1) // block_size)
-        else:
-             threads_per_block = block_config[0] * block_config[1]
-             total_pixels = H * W
-             num_blocks = (total_pixels + threads_per_block - 1) // threads_per_block
-             grid_config = (num_blocks, 1) 
-
-        # 7. Preparar argumentos para process_gpu
         process_gpu_args = {
             'image': image, 
             'kernel': kernel, 
@@ -231,52 +229,59 @@ def process_gpu():
             'grid_config': grid_config
         }
         
-        # --- AÑADIR ARGUMENTOS ESPECÍFICOS ---
-        if filter_name in ['sticker']:
-            sticker_path_default = filter_instance.get_parameters()['sticker_img_path']['default']
+        # 7. Añadir argumentos específicos según el filtro
+        
+        # STICKER FILTER
+        if filter_name == 'sticker':
+            sticker_path_default = filter_params.get('sticker_img_path', {}).get('default', 'stickers/default.png')
             sticker_path = request.form.get('sticker_img_path', sticker_path_default)
             process_gpu_args['sticker_img_path'] = sticker_path
-            target_x = int(request.form.get('target_x', filter_instance.get_parameters()['target_x']['default']))
-            target_y = int(request.form.get('target_y', filter_instance.get_parameters()['target_y']['default']))
-            target_w = int(request.form.get('target_w', filter_instance.get_parameters()['target_w']['default']))
-            target_h = int(request.form.get('target_h', filter_instance.get_parameters()['target_h']['default']))
+            
+            target_x = int(request.form.get('target_x', filter_params.get('target_x', {}).get('default', 0)))
+            target_y = int(request.form.get('target_y', filter_params.get('target_y', {}).get('default', 0)))
+            target_w = int(request.form.get('target_w', filter_params.get('target_w', {}).get('default', 100)))
+            target_h = int(request.form.get('target_h', filter_params.get('target_h', {}).get('default', 100)))
             
             process_gpu_args['target_x'] = target_x
             process_gpu_args['target_y'] = target_y
             process_gpu_args['target_w'] = target_w
             process_gpu_args['target_h'] = target_h
 
+        # DEPTH OF FIELD FILTERS
         if filter_name in ['depth_of_field', 'depth_of_field_duotone']:
-            # El filtro se encarga de calcular el 50% central si todos son 0.
-            roi_x_start = int(request.form.get('roi_x_start', filter_instance.get_parameters()['roi_x_start']['default']))
-            roi_y_start = int(request.form.get('roi_y_start', filter_instance.get_parameters()['roi_y_start']['default']))
-            roi_x_end = int(request.form.get('roi_x_end', filter_instance.get_parameters()['roi_x_end']['default']))
-            roi_y_end = int(request.form.get('roi_y_end', filter_instance.get_parameters()['roi_y_end']['default']))
+            roi_x_start = int(request.form.get('roi_x_start', filter_params.get('roi_x_start', {}).get('default', 0)))
+            roi_y_start = int(request.form.get('roi_y_start', filter_params.get('roi_y_start', {}).get('default', 0)))
+            roi_x_end = int(request.form.get('roi_x_end', filter_params.get('roi_x_end', {}).get('default', 0)))
+            roi_y_end = int(request.form.get('roi_y_end', filter_params.get('roi_y_end', {}).get('default', 0)))
             
             process_gpu_args['roi_coords'] = (roi_x_start, roi_y_start, roi_x_end, roi_y_end)
 
-
-        
-        # Llamada al proceso 
+        # Ejecutar procesamiento GPU
         output, gpu_time = filter_instance.process_gpu(**process_gpu_args)
 
-        
         result = {
             "success": True,
             "processor": "GPU",
             "filter": filter_name,
-            "image_size": {"width": W, "height": H, "channels": output.shape[-1] if len(output.shape)>2 else 1},
+            "image_size": {
+                "width": W, 
+                "height": H, 
+                "channels": output.shape[-1] if len(output.shape) > 2 else 1
+            },
             "kernel_size": kernel_size,
             "processing_time_ms": round(gpu_time, 3)
         }
+        
+        if filter_name == 'blur':
+            result['sigma'] = sigma
         
         img_buffer = array_to_image_bytes(output)
         img_base64 = base64.b64encode(img_buffer.getvalue()).decode('utf-8')
 
         return jsonify({
+            **result,
             "image_base64": img_base64
         })
-
 
     except Exception as e:
         return jsonify({
