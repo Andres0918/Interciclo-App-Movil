@@ -11,7 +11,7 @@ firebase:
 
 cuda:
   service:
-    url: http://192.168.18.47:5000
+    url: http://filter-service:5000
 
 eureka:
   client:
