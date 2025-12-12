@@ -5,7 +5,6 @@ import com.example.demo.model.responses.PublicacionResponse
 
 import com.google.cloud.firestore.Firestore
 import com.google.cloud.firestore.Query
-import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
@@ -13,14 +12,12 @@ import reactor.core.scheduler.Schedulers
 import java.util.*
 
 @Service
-
 class PublicacionService(
     private val firestore: Firestore,
     private val storageService: StorageService,
     private val cudaClient: CudaServiceClient
 ) {
     private val collectionName = "publicaciones"
-    private val log = LoggerFactory.getLogger(PublicacionService::class.java)
 
     fun crearPublicacion(
         accountId: String,
@@ -28,7 +25,6 @@ class PublicacionService(
         imagen: ByteArray,
         filterName: String?
     ): Mono<PublicacionResponse> {
-        log.info("Iniciando publicacion")
         return Mono.just(imagen)
             .flatMap { imageBytes ->
                 // Si hay filtro, procesar con CUDA

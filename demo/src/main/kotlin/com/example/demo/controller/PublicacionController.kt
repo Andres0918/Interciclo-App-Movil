@@ -2,127 +2,102 @@ package com.example.demo.controller
 
 import com.example.demo.model.responses.PublicacionResponse
 import com.example.demo.service.PublicacionService
-import org.slf4j.LoggerFactory
+import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
-import org.springframework.http.ResponseEntity
 import org.springframework.http.codec.multipart.FilePart
 import org.springframework.web.bind.annotation.*
-import org.springframework.web.multipart.MultipartFile
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
-import reactor.core.scheduler.Schedulers
+import java.util.UUID
 
 @RestController
 @RequestMapping("/app/publicacion")
 class PublicacionController(
     private val publicacionService: PublicacionService
 ) {
-    private val log = LoggerFactory.getLogger(PublicacionController::class.java)
 
     @PostMapping(consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
+    @ResponseStatus(HttpStatus.CREATED)
     fun crearPublicacion(
         @RequestPart("descripcion") descripcion: String,
-        @RequestPart("filter") filter: String,
         @RequestPart("imagen") imagen: FilePart,
-        @RequestHeader("X-Account-Id") accountId: String
-    ): Mono<ResponseEntity<PublicacionResponse>> {
-        log.info("📤 Creando publicación para cuenta: $accountId")
-        log.info("📝 Descripción: $descripcion")
-        log.info("🎨 Filtro: $filter")
-        log.info("🖼️ Imagen: ${imagen.filename()}")
-
+        @RequestPart("filter", required = false) filter: String?,
+        @RequestHeader accountId: UUID
+    ): Mono<PublicacionResponse> {
+        // Convertir FilePart a ByteArray reactivamente
         return imagen.content()
-            .map { dataBuffer ->
+            .reduce(ByteArray(0)) { acc, dataBuffer ->
                 val bytes = ByteArray(dataBuffer.readableByteCount())
                 dataBuffer.read(bytes)
-                bytes
+                org.springframework.core.io.buffer.DataBufferUtils.release(dataBuffer)
+                acc + bytes
             }
-            .reduce { acc, bytes -> acc + bytes }
             .flatMap { imageBytes ->
-                log.info("📊 Tamaño imagen: ${imageBytes.size} bytes")
                 publicacionService.crearPublicacion(
-                    accountId = accountId,
+                    accountId = accountId.toString(),
                     descripcion = descripcion,
                     imagen = imageBytes,
                     filterName = filter
                 )
             }
-            .map { ResponseEntity.ok(it) }
-            .doOnError { error ->
-                log.error("❌ Error creando publicación: ${error.message}", error)
-            }
+    }
+
+    @GetMapping("/obtener/all")
+    fun getPublicacionesByAccountId(
+        @RequestHeader accountId: String
+    ): Flux<PublicacionResponse> {
+        return publicacionService.getPublicacionesByAccount(accountId)
+    }
+
+    @GetMapping("/obtener/{publicacionId}")
+    fun getPublicacionById(
+        @PathVariable publicacionId: String
+    ): Mono<PublicacionResponse> {
+        return publicacionService.getPublicacionById(publicacionId)
     }
 
     @GetMapping("/feed")
     fun getFeed(
         @RequestParam(defaultValue = "50") limit: Int
     ): Flux<PublicacionResponse> {
-        log.info("📰 Obteniendo feed (limit: $limit)")
         return publicacionService.getFeed(limit)
     }
 
-    @GetMapping("/add/like")
-    fun addLike(
+    @PutMapping("/add/like")
+    fun getDarLike(
         @RequestParam publicacionId: String
-    ): Mono<ResponseEntity<PublicacionResponse>> {
-        log.info("❤️ Dando like a publicación: $publicacionId")
+    ): Mono<PublicacionResponse> {
         return publicacionService.darLike(publicacionId)
-            .map { ResponseEntity.ok(it) }
     }
 
     @PutMapping("/quit/like")
     fun quitLike(
         @RequestParam publicacionId: String
-    ): Mono<ResponseEntity<PublicacionResponse>> {
-        log.info("💔 Quitando like de publicación: $publicacionId")
+    ): Mono<PublicacionResponse> {
         return publicacionService.quitarLike(publicacionId)
-            .map { ResponseEntity.ok(it) }
     }
 
-    @PutMapping("/comment/post/{postId}")
-    fun comentarPost(
-        @PathVariable postId: String,
+    @PutMapping("/comment/post/{publicacionId}")
+    fun comentarPublicacion(
+        @PathVariable publicacionId: String,
         @RequestParam comentario: String
-    ): Mono<ResponseEntity<PublicacionResponse>> {
-        log.info("💬 Agregando comentario a publicación: $postId")
-        log.info("📝 Comentario: $comentario")
-        return publicacionService.agregarComentario(postId, comentario)
-            .map { ResponseEntity.ok(it) }
-    }
-
-    @GetMapping("/obtener/{publicacionId}")
-    fun getPublicacionById(
-        @PathVariable publicacionId: String
-    ): Mono<ResponseEntity<PublicacionResponse>> {
-        log.info("🔍 Obteniendo publicación: $publicacionId")
-        return publicacionService.getPublicacionById(publicacionId)
-            .map { ResponseEntity.ok(it) }
-    }
-
-    @GetMapping("/obtener/all")
-    fun getAllByAccount(
-        @RequestHeader("X-Account-Id") accountId: String
-    ): Flux<PublicacionResponse> {
-        log.info("📋 Obteniendo publicaciones de cuenta: $accountId")
-        return publicacionService.getPublicacionesByAccount(accountId)
+    ): Mono<PublicacionResponse> {
+        return publicacionService.agregarComentario(publicacionId, comentario)
     }
 
     @PutMapping("/change/description/{publicacionId}")
-    fun cambiarDescripcion(
+    fun changeDescription(
         @PathVariable publicacionId: String,
         @RequestParam description: String
-    ): Mono<ResponseEntity<PublicacionResponse>> {
-        log.info("✏️ Cambiando descripción de publicación: $publicacionId")
+    ): Mono<PublicacionResponse> {
         return publicacionService.cambiarDescripcion(publicacionId, description)
-            .map { ResponseEntity.ok(it) }
     }
 
     @DeleteMapping("/{publicacionId}")
     fun eliminarPublicacion(
         @PathVariable publicacionId: String
-    ): Mono<ResponseEntity<Boolean>> {
-        log.info("🗑️ Eliminando publicación: $publicacionId")
+    ): Mono<Map<String, Boolean>> {
         return publicacionService.eliminarPublicacion(publicacionId)
-            .map { ResponseEntity.ok(it) }
+            .map { mapOf("success" to it) }
     }
 }

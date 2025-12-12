@@ -76,7 +76,7 @@ class AuthService {
 
           print(' Autenticando en Firebase (registro)…');
           final userCredential =
-          await _auth.signInWithCustomToken(customToken);
+              await _auth.signInWithCustomToken(customToken);
 
           print('✅ Usuario registrado: ${userCredential.user?.email}');
 
@@ -97,56 +97,50 @@ class AuthService {
   }
 
   /// LOGIN
-  /// LOGIN - Autenticar directamente con Firebase
   Future<Map<String, dynamic>> login({
     required String email,
     required String password,
   }) async {
     try {
-      print('🔐 Autenticando con Firebase...');
+      print(' Iniciando sesión: $email');
 
-      // ✅ Autenticar directamente con Firebase
-      final userCredential = await _auth.signInWithEmailAndPassword(
-        email: email,
-        password: password,
+      final response = await http.post(
+        Uri.parse('$baseUrlGateway/auth/login'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'password': password,
+        }),
       );
 
-      print('✅ Login exitoso: ${userCredential.user?.email}');
+      print(' Response login: ${response.statusCode}');
+      print(' Body login: ${response.body}');
 
-      return {
-        'success': true,
-        'user': userCredential.user,
-      };
-    } on FirebaseAuthException catch (e) {
-      print('❌ Error de Firebase: ${e.code}');
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
 
-      String errorMessage;
-      switch (e.code) {
-        case 'user-not-found':
-          errorMessage = 'Usuario no encontrado';
-          break;
-        case 'wrong-password':
-          errorMessage = 'Contraseña incorrecta';
-          break;
-        case 'invalid-email':
-          errorMessage = 'Email inválido';
-          break;
-        case 'user-disabled':
-          errorMessage = 'Usuario deshabilitado';
-          break;
-        case 'too-many-requests':
-          errorMessage = 'Demasiados intentos. Intenta más tarde';
-          break;
-        case 'invalid-credential':
-          errorMessage = 'Credenciales inválidas';
-          break;
-        default:
-          errorMessage = 'Error de autenticación: ${e.message}';
+        if (data['success'] == true) {
+          final customToken = data['data']['customToken'] as String;
+
+          // ✅ Autenticar en Firebase con custom token
+          print(' Autenticando en Firebase (login)…');
+          final userCredential =
+              await _auth.signInWithCustomToken(customToken);
+
+          print('✅ Login exitoso: ${userCredential.user?.email}');
+
+          return {'success': true, 'user': userCredential.user};
+        } else {
+          return {
+            'success': false,
+            'error': data['error'] ?? 'Credenciales inválidas',
+          };
+        }
       }
 
-      return {'success': false, 'error': errorMessage};
+      return {'success': false, 'error': 'Error ${response.statusCode}'};
     } catch (e) {
-      print('❌ Error en login: $e');
+      print(' Error en login: $e');
       return {'success': false, 'error': e.toString()};
     }
   }
@@ -211,7 +205,7 @@ class Post {
         : int.tryParse(likesRaw.toString()) ?? 0;
 
     final author =
-    (json['author'] ?? json['usuario'] ?? json['username'])?.toString();
+        (json['author'] ?? json['usuario'] ?? json['username'])?.toString();
     final filterApplied = json['filterApplied']?.toString();
 
     final createdAtRaw = json['createdAt'];
@@ -290,18 +284,17 @@ class ApiService {
         '$baseUrlGateway/app/publicacion/add/like?publicacionId=$publicacionId',
       );
 
-      // ✅ Cambiar a GET según tu Postman
-      final response = await http.get(
+      final response = await http.put(
         uri,
         headers: {
           'Authorization': 'Bearer $idToken',
         },
       );
 
-      print('🔥 addLike(${publicacionId}) => ${response.statusCode}');
+      print(' addLike(${publicacionId}) => ${response.statusCode}');
       return response.statusCode == 200;
     } catch (e) {
-      print('❌ Error dando like: $e');
+      print(' Error dando like: $e');
       return false;
     }
   }
@@ -316,7 +309,6 @@ class ApiService {
         '$baseUrlGateway/app/publicacion/quit/like?publicacionId=$publicacionId',
       );
 
-      // ✅ PUT está correcto
       final response = await http.put(
         uri,
         headers: {
@@ -324,10 +316,10 @@ class ApiService {
         },
       );
 
-      print('🔥 quitLike(${publicacionId}) => ${response.statusCode}');
+      print(' quitLike(${publicacionId}) => ${response.statusCode}');
       return response.statusCode == 200;
     } catch (e) {
-      print('❌ Error quitando like: $e');
+      print(' Error quitando like: $e');
       return false;
     }
   }
@@ -341,26 +333,26 @@ class ApiService {
       final idToken = await _authService.getIdToken();
       if (idToken == null) return false;
 
-      // ✅ Usar Uri.replace para query params seguros
       final uri = Uri.parse(
         '$baseUrlGateway/app/publicacion/comment/post/$postId',
       ).replace(queryParameters: {
         'comentario': comentario,
       });
 
-      final response = await http.put(
+      final response = await http.post(
         uri,
         headers: {
           'Authorization': 'Bearer $idToken',
         },
       );
 
-      print('💬 comentarPublicacion($postId) => ${response.statusCode}');
-      print('📝 Body: ${response.body}');
+      print(
+          ' comentarPublicacion($postId, "$comentario") => ${response.statusCode}');
+      print(' Body comentar: ${response.body}');
 
       return response.statusCode == 200 || response.statusCode == 201;
     } catch (e) {
-      print('❌ Error comentando: $e');
+      print(' Error comentando publicación: $e');
       return false;
     }
   }
@@ -589,11 +581,11 @@ class _LoginScreenState extends State<LoginScreen> {
                             onPressed: _isLoading ? null : _login,
                             child: _isLoading
                                 ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2),
-                            )
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  )
                                 : const Text('Iniciar sesión'),
                           ),
                         ),
@@ -687,7 +679,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         child: Card(
           elevation: 2,
           shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: Padding(
             padding: const EdgeInsets.all(16.0),
             child: Form(
@@ -697,7 +689,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   const Text(
                     'Regístrate en UPSGlam',
                     style:
-                    TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -781,11 +773,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       onPressed: _isLoading ? null : _register,
                       child: _isLoading
                           ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2),
-                      )
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2),
+                            )
                           : const Text('Crear cuenta'),
                     ),
                   ),
@@ -957,10 +949,10 @@ class _NewPostScreenState extends State<NewPostScreen> {
                 items: kAvailableFilters
                     .map(
                       (f) => DropdownMenuItem(
-                    value: f,
-                    child: Text(f),
-                  ),
-                )
+                        value: f,
+                        child: Text(f),
+                      ),
+                    )
                     .toList(),
                 onChanged: (value) {
                   setState(() {
@@ -988,10 +980,10 @@ class _NewPostScreenState extends State<NewPostScreen> {
                   onPressed: _isSubmitting ? null : _submit,
                   icon: _isSubmitting
                       ? const SizedBox(
-                    height: 18,
-                    width: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
                       : const Icon(Icons.send),
                   label: Text(
                     _isSubmitting ? 'Publicando...' : 'Publicar',
@@ -1062,7 +1054,7 @@ class _FeedScreenState extends State<FeedScreen> {
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginScreen()),
-            (route) => false,
+        (route) => false,
       );
     }
   }
@@ -1292,7 +1284,7 @@ class _PostCard extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       shape:
-      RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1397,10 +1389,10 @@ class _PostCard extends StatelessWidget {
                       .take(2)
                       .map(
                         (c) => Text(
-                      '• $c',
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  )
+                          '• $c',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      )
                       .toList(),
                   if (post.comments.length > 2)
                     Text(
